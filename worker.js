@@ -1,17 +1,24 @@
 // Cloudflare Worker for the TAS Digital Free Resources site.
 // Serves the static site (index.html) and exposes GET /api/resources,
 // which returns resource rows from Airtable as JSON.
-// Also injects CSS + a script that: hides the page's leftover debug
-// overlay (#__bundler_err), adds subtle card animations, and wires each
-// resource card's "Open" button to its Airtable link (after the email
-// gate). The page's bootloader replaces the DOM at startup (wiping any
-// injected <style>), so the script re-inserts the CSS and uses a
-// MutationObserver to keep the overlay hidden.
+// Also: proxies the brand logo images from the TAS Digital Webflow CDN
+// (the repo has no assets/ folder), injects CSS + a script that hides the
+// page's leftover debug overlay, adds subtle card animations, and wires
+// each resource card's "Open" button to its Airtable link.
 // Requires the AIRTABLE_TOKEN secret (set in the Cloudflare dashboard).
 
 const AIRTABLE_BASE = "appU32zN67pMhC0IU";
 const AIRTABLE_TABLE = "tblymxflXKKk955LI";
 const EDGE_CACHE_SECONDS = 300; // 5 minutes
+
+// Brand images referenced by index.html but missing from the repo.
+// Proxied from the TAS Digital site's CDN and edge-cached for a day.
+const IMAGE_PROXY = {
+  "/assets/tas-logo-black.png":
+    "https://cdn.prod.website-files.com/654e8713431b6e197569c212/6647386838d851201c65f7a0_talas%20logo%201.png",
+  "/assets/tas-mark.png":
+    "https://cdn.prod.website-files.com/654e8713431b6e197569c212/6554d536c8357781ef074345_tas%20webicon.png",
+};
 
 const INJECT_CSS = [
   "#__bundler_err{display:none !important}",
@@ -42,6 +49,15 @@ export default {
       }
     }
 
+    if (IMAGE_PROXY[url.pathname]) {
+      try {
+        return await proxyImage(url.pathname, request, ctx);
+      } catch (err) {
+        console.error("image proxy error:", err);
+        return new Response("Not found", { status: 404 });
+      }
+    }
+
     // Everything else: serve the static assets (index.html etc.)
     const assetResponse = await env.ASSETS.fetch(request);
     const contentType = assetResponse.headers.get("content-type") || "";
@@ -65,6 +81,24 @@ export default {
     return assetResponse;
   },
 };
+
+async function proxyImage(pathname, request, ctx) {
+  const cache = caches.default;
+  const cacheKey = new Request(new URL(pathname, request.url));
+  const hit = await cache.match(cacheKey);
+  if (hit) return hit;
+
+  const upstream = await fetch(IMAGE_PROXY[pathname]);
+  if (!upstream.ok) throw new Error("upstream " + upstream.status);
+  const response = new Response(upstream.body, {
+    headers: {
+      "Content-Type": "image/png",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+  ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+}
 
 async function resources(request, env, ctx) {
   const cache = caches.default;
@@ -122,7 +156,16 @@ function json(body, status, extraHeaders) {
   return new Response(JSON.stringify(body), { status: status || 200, headers });
 }
 
-// Injected into every HTML page (TAS_CSS is prepended at build of the tag).
+// Injected into every HTML page. Jobs:
+// 1) Capture runtime errors (window.__errCapture) for diagnostics.
+// 2) Re-insert injected CSS after the page's bootloader wipes the DOM and
+//    keep the debug overlay hidden via MutationObserver.
+// 3) Fetch /api/resources, pair each resource card with its Airtable row
+//    (token-overlap matching), and make "Open" buttons open the link in a
+//    new tab once the visitor has passed the email gate.
+// 4) Reveal cards with a soft fade/slide as they scroll into view.
+// If the page later ships its own wiring (window.__resourceLinksWired),
+// this script backs off.
 const WIRE_SCRIPT = `(function () {
   if (window.__resourceLinksWired) return;
   window.__resourceLinksWired = true;
