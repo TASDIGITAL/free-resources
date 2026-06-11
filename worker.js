@@ -1,9 +1,10 @@
 // Cloudflare Worker for the TAS Digital Free Resources site.
 // Serves the static site (index.html) and exposes GET /api/resources,
 // which returns resource rows from Airtable as JSON.
-// Also injects a small script into HTML pages that wires each resource
-// card's "Open" button to its Airtable link (after the email gate).
-// Requires the AIRTABLE_TOKEN secret (set in the Cloudflare dashboard).
+// Also injects: (a) a CSS rule that hides the page's leftover debug
+// overlay (#__bundler_err) from first paint, and (b) a script that wires
+// each resource card's "Open" button to its Airtable link (after the
+// email gate). Requires the AIRTABLE_TOKEN secret.
 
 const AIRTABLE_BASE = "appU32zN67pMhC0IU";
 const AIRTABLE_TABLE = "tblymxflXKKk955LI";
@@ -30,6 +31,11 @@ export default {
     const contentType = assetResponse.headers.get("content-type") || "";
     if (contentType.includes("text/html")) {
       return new HTMLRewriter()
+        .on("head", {
+          element(el) {
+            el.append("<style>#__bundler_err{display:none !important}</style>", { html: true });
+          },
+        })
         .on("body", {
           element(el) {
             el.append("<script>" + WIRE_SCRIPT + "<\/script>", { html: true });
@@ -98,8 +104,8 @@ function json(body, status, extraHeaders) {
 }
 
 // Injected into every HTML page. Three jobs:
-// 1) Capture runtime errors (window.__errCapture) for diagnostics and hide
-//    the page's leftover debug overlay (#__bundler_err) from visitors.
+// 1) Capture runtime errors (window.__errCapture) for diagnostics; the
+//    debug overlay itself is hidden by injected CSS from first paint.
 // 2) Fetch /api/resources, pair each resource card with its Airtable row
 //    (token-overlap matching, since card titles are display copy), then make
 //    "Open" buttons open the link in a new tab once the visitor has passed
@@ -122,10 +128,6 @@ const WIRE_SCRIPT = `(function () {
   window.addEventListener("unhandledrejection", function (e) {
     try { window.__errCapture.push("promise: " + String((e.reason && e.reason.stack) || e.reason).slice(0, 400)); } catch (x) {}
   });
-  function hideDebugOverlay() {
-    var d = document.getElementById("__bundler_err");
-    if (d) d.style.display = "none";
-  }
   function unlocked() {
     try { return !!localStorage.getItem("tas_bundle_lead_v1"); } catch (e) { return false; }
   }
@@ -140,7 +142,6 @@ const WIRE_SCRIPT = `(function () {
   function size(o) { return Object.keys(o).length; }
   var resourceList = null;
   function applyLinks() {
-    hideDebugOverlay();
     if (!resourceList) return 0;
     var cards = [].slice.call(document.querySelectorAll("article.card")).filter(function (c) {
       return c.querySelector(".card__title");
