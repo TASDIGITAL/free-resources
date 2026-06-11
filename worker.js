@@ -1,14 +1,28 @@
 // Cloudflare Worker for the TAS Digital Free Resources site.
 // Serves the static site (index.html) and exposes GET /api/resources,
 // which returns resource rows from Airtable as JSON.
-// Also injects: (a) a CSS rule that hides the page's leftover debug
-// overlay (#__bundler_err) from first paint, and (b) a script that wires
-// each resource card's "Open" button to its Airtable link (after the
-// email gate). Requires the AIRTABLE_TOKEN secret.
+// Also injects: (a) CSS that hides the page's leftover debug overlay
+// (#__bundler_err) from first paint and adds subtle card animations,
+// and (b) a script that wires each resource card's "Open" button to its
+// Airtable link (after the email gate) and reveals cards on scroll.
+// Requires the AIRTABLE_TOKEN secret (set in the Cloudflare dashboard).
 
 const AIRTABLE_BASE = "appU32zN67pMhC0IU";
 const AIRTABLE_TABLE = "tblymxflXKKk955LI";
 const EDGE_CACHE_SECONDS = 300; // 5 minutes
+
+const INJECT_CSS = [
+  "#__bundler_err{display:none !important}",
+  "@media (prefers-reduced-motion: no-preference){",
+  ".tas-anim{opacity:0}",
+  ".tas-anim.tas-in{animation:tasReveal .55s ease forwards}",
+  "@keyframes tasReveal{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}",
+  "article.card{transition:transform .25s ease,box-shadow .25s ease}",
+  "article.card:hover{transform:translateY(-4px);box-shadow:0 14px 30px rgba(20,10,50,.12)}",
+  ".card__open{transition:transform .15s ease}",
+  ".card__open:hover{transform:scale(1.06)}",
+  "}",
+].join("");
 
 export default {
   async fetch(request, env, ctx) {
@@ -33,7 +47,7 @@ export default {
       return new HTMLRewriter()
         .on("head", {
           element(el) {
-            el.append("<style>#__bundler_err{display:none !important}</style>", { html: true });
+            el.append("<style>" + INJECT_CSS + "</style>", { html: true });
           },
         })
         .on("body", {
@@ -103,15 +117,13 @@ function json(body, status, extraHeaders) {
   return new Response(JSON.stringify(body), { status: status || 200, headers });
 }
 
-// Injected into every HTML page. Three jobs:
-// 1) Capture runtime errors (window.__errCapture) for diagnostics; the
-//    debug overlay itself is hidden by injected CSS from first paint.
+// Injected into every HTML page. Jobs:
+// 1) Capture runtime errors (window.__errCapture) for diagnostics.
 // 2) Fetch /api/resources, pair each resource card with its Airtable row
-//    (token-overlap matching, since card titles are display copy), then make
-//    "Open" buttons open the link in a new tab once the visitor has passed
-//    the email gate (lead in localStorage).
-// 3) Retry the pairing for ~20s because the cards are rendered by React
-//    after DOMContentLoaded (in-browser Babel), so they may not exist yet.
+//    (token-overlap matching), and make "Open" buttons open the link in a
+//    new tab once the visitor has passed the email gate.
+// 3) Reveal cards with a soft fade/slide as they scroll into view.
+// 4) Retry for ~20s because cards render after DOMContentLoaded (React).
 // If the page later ships its own wiring (window.__resourceLinksWired),
 // this script backs off.
 const WIRE_SCRIPT = `(function () {
@@ -140,6 +152,25 @@ const WIRE_SCRIPT = `(function () {
     return out;
   }
   function size(o) { return Object.keys(o).length; }
+  function animInit() {
+    if (!("IntersectionObserver" in window)) return;
+    if (!window.__tasObserver) {
+      window.__tasObserver = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting) {
+            en.target.classList.add("tas-in");
+            window.__tasObserver.unobserve(en.target);
+          }
+        });
+      }, { threshold: 0.12 });
+    }
+    var els = [].slice.call(document.querySelectorAll("article.card:not(.tas-anim)"));
+    els.forEach(function (el, i) {
+      el.classList.add("tas-anim");
+      el.style.animationDelay = (i % 3) * 90 + "ms";
+      window.__tasObserver.observe(el);
+    });
+  }
   var resourceList = null;
   function applyLinks() {
     if (!resourceList) return 0;
@@ -170,6 +201,7 @@ const WIRE_SCRIPT = `(function () {
   var attempts = 0;
   function tryWire() {
     attempts++;
+    animInit();
     var wired = applyLinks();
     if (wired === 0 && attempts < 30) setTimeout(tryWire, 700);
   }
