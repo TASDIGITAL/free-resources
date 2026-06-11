@@ -1,18 +1,20 @@
 // Cloudflare Worker for the TAS Digital Free Resources site.
-// Serves the static site (index.html) and exposes GET /api/resources,
-// which returns resource rows from Airtable as JSON.
-// Also: proxies the brand logo images from the TAS Digital Webflow CDN
-// (the repo has no assets/ folder), injects CSS + a script that hides the
-// page's leftover debug overlay, adds subtle card animations, and wires
-// each resource card's "Open" button to its Airtable link.
+// - Serves the static site (index.html).
+// - GET /api/resources: resource rows from Airtable as JSON.
+// - POST /api/gate: upserts the visitor as a GHL contact (lead magnet +
+//   existing clients). Requires the GHL_TOKEN secret; returns 503 until set.
+// - Proxies the brand logo images from the TAS Digital Webflow CDN.
+// - Injects CSS + a script: hides the page's leftover debug overlay, adds
+//   subtle card animations, sizes the logo, wires each card's "Open"
+//   button to its Airtable link, and mirrors gate submissions to /api/gate.
 // Requires the AIRTABLE_TOKEN secret (set in the Cloudflare dashboard).
 
 const AIRTABLE_BASE = "appU32zN67pMhC0IU";
 const AIRTABLE_TABLE = "tblymxflXKKk955LI";
 const EDGE_CACHE_SECONDS = 300; // 5 minutes
+const GHL_LOCATION = "UU7LapvpwFZtFHJHRtAA";
 
 // Brand images referenced by index.html but missing from the repo.
-// Proxied from the TAS Digital site's CDN and edge-cached for a day.
 const IMAGE_PROXY = {
   "/assets/tas-logo-black.png":
     "https://cdn.prod.website-files.com/654e8713431b6e197569c212/6647386838d851201c65f7a0_talas%20logo%201.png",
@@ -22,6 +24,8 @@ const IMAGE_PROXY = {
 
 const INJECT_CSS = [
   "#__bundler_err{display:none !important}",
+  ".topbar__logo{height:36px !important}",
+  ".foot__logo{height:30px !important}",
   "@media (prefers-reduced-motion: no-preference){",
   ".tas-anim{opacity:0}",
   ".tas-anim.tas-in{animation:tasReveal .55s ease forwards}",
@@ -46,6 +50,18 @@ export default {
       } catch (err) {
         console.error("resources error:", err);
         return json({ error: "Failed to load resources" }, 502);
+      }
+    }
+
+    if (url.pathname === "/api/gate") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+      try {
+        return await gate(request, env);
+      } catch (err) {
+        console.error("gate error:", err);
+        return json({ ok: false }, 502);
       }
     }
 
@@ -81,6 +97,43 @@ export default {
     return assetResponse;
   },
 };
+
+// Upsert the visitor into GHL. Existing contacts are recognised by email;
+// new visitors become new contacts. Both get the d2c-resource-library tag,
+// so automations can target them (new contacts also fire GHL's
+// "contact created" trigger for lead-magnet follow-up).
+async function gate(request, env) {
+  if (!env.GHL_TOKEN) return json({ ok: false, error: "Gate not configured" }, 503);
+  let body;
+  try {
+    body = await request.json();
+  } catch (e) {
+    return json({ ok: false, error: "Invalid JSON" }, 400);
+  }
+  const email = String(body.email || "").trim().toLowerCase().slice(0, 200);
+  const name = String(body.full_name || "").trim().slice(0, 120);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return json({ ok: false, error: "Invalid email" }, 400);
+  }
+  const res = await fetch("https://services.leadconnectorhq.com/contacts/upsert", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + env.GHL_TOKEN,
+      Version: "2021-07-28",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      locationId: GHL_LOCATION,
+      email: email,
+      name: name || undefined,
+      source: "D2C Resource Library",
+      tags: ["d2c-resource-library"],
+    }),
+  });
+  if (!res.ok) throw new Error("GHL upsert responded " + res.status);
+  const data = await res.json();
+  return json({ ok: true, existing: !(data && data.new) });
+}
 
 async function proxyImage(pathname, request, ctx) {
   const cache = caches.default;
@@ -164,6 +217,7 @@ function json(body, status, extraHeaders) {
 //    (token-overlap matching), and make "Open" buttons open the link in a
 //    new tab once the visitor has passed the email gate.
 // 4) Reveal cards with a soft fade/slide as they scroll into view.
+// 5) Mirror gate form submissions to /api/gate (GHL contact upsert).
 // If the page later ships its own wiring (window.__resourceLinksWired),
 // this script backs off.
 const WIRE_SCRIPT = `(function () {
@@ -213,6 +267,24 @@ const WIRE_SCRIPT = `(function () {
       }
     }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "id"] });
   } catch (x) {}
+  // Mirror gate submissions to /api/gate so GHL gets a contact upsert.
+  document.addEventListener("submit", function (e) {
+    var f = e.target;
+    if (!f || !f.classList || !f.classList.contains("gate__form")) return;
+    try {
+      var nameEl = document.getElementById("g-name");
+      var emailEl = document.getElementById("g-email");
+      var payload = { full_name: nameEl ? nameEl.value : "", email: emailEl ? emailEl.value : "" };
+      if (payload.email) {
+        fetch("/api/gate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          keepalive: true,
+        }).catch(function () {});
+      }
+    } catch (x) {}
+  }, true);
   function unlocked() {
     try { return !!localStorage.getItem("tas_bundle_lead_v1"); } catch (e) { return false; }
   }
