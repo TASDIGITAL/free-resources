@@ -1,10 +1,12 @@
 // Cloudflare Worker for the TAS Digital Free Resources site.
 // Serves the static site (index.html) and exposes GET /api/resources,
 // which returns resource rows from Airtable as JSON.
-// Also injects: (a) CSS that hides the page's leftover debug overlay
-// (#__bundler_err) from first paint and adds subtle card animations,
-// and (b) a script that wires each resource card's "Open" button to its
-// Airtable link (after the email gate) and reveals cards on scroll.
+// Also injects CSS + a script that: hides the page's leftover debug
+// overlay (#__bundler_err), adds subtle card animations, and wires each
+// resource card's "Open" button to its Airtable link (after the email
+// gate). The page's bootloader replaces the DOM at startup (wiping any
+// injected <style>), so the script re-inserts the CSS and uses a
+// MutationObserver to keep the overlay hidden.
 // Requires the AIRTABLE_TOKEN secret (set in the Cloudflare dashboard).
 
 const AIRTABLE_BASE = "appU32zN67pMhC0IU";
@@ -52,7 +54,10 @@ export default {
         })
         .on("body", {
           element(el) {
-            el.append("<script>" + WIRE_SCRIPT + "<\/script>", { html: true });
+            el.append(
+              "<script>var TAS_CSS=" + JSON.stringify(INJECT_CSS) + ";" + WIRE_SCRIPT + "<\/script>",
+              { html: true }
+            );
           },
         })
         .transform(assetResponse);
@@ -117,15 +122,7 @@ function json(body, status, extraHeaders) {
   return new Response(JSON.stringify(body), { status: status || 200, headers });
 }
 
-// Injected into every HTML page. Jobs:
-// 1) Capture runtime errors (window.__errCapture) for diagnostics.
-// 2) Fetch /api/resources, pair each resource card with its Airtable row
-//    (token-overlap matching), and make "Open" buttons open the link in a
-//    new tab once the visitor has passed the email gate.
-// 3) Reveal cards with a soft fade/slide as they scroll into view.
-// 4) Retry for ~20s because cards render after DOMContentLoaded (React).
-// If the page later ships its own wiring (window.__resourceLinksWired),
-// this script backs off.
+// Injected into every HTML page (TAS_CSS is prepended at build of the tag).
 const WIRE_SCRIPT = `(function () {
   if (window.__resourceLinksWired) return;
   window.__resourceLinksWired = true;
@@ -140,6 +137,39 @@ const WIRE_SCRIPT = `(function () {
   window.addEventListener("unhandledrejection", function (e) {
     try { window.__errCapture.push("promise: " + String((e.reason && e.reason.stack) || e.reason).slice(0, 400)); } catch (x) {}
   });
+  function killOverlay(n) {
+    if (n && n.id === "__bundler_err") {
+      try { n.style.setProperty("display", "none", "important"); } catch (x) {}
+    }
+  }
+  function ensureCss() {
+    try {
+      if (!document.getElementById("tas-inject-css")) {
+        var st = document.createElement("style");
+        st.id = "tas-inject-css";
+        st.textContent = TAS_CSS;
+        (document.head || document.documentElement).appendChild(st);
+      }
+      killOverlay(document.getElementById("__bundler_err"));
+    } catch (x) {}
+  }
+  try {
+    new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var m = muts[i];
+        killOverlay(m.target);
+        if (m.addedNodes) {
+          for (var j = 0; j < m.addedNodes.length; j++) {
+            var n = m.addedNodes[j];
+            if (n.nodeType === 1) {
+              killOverlay(n);
+              if (n.querySelector) killOverlay(n.querySelector("#__bundler_err"));
+            }
+          }
+        }
+      }
+    }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "id"] });
+  } catch (x) {}
   function unlocked() {
     try { return !!localStorage.getItem("tas_bundle_lead_v1"); } catch (e) { return false; }
   }
@@ -201,11 +231,16 @@ const WIRE_SCRIPT = `(function () {
   var attempts = 0;
   function tryWire() {
     attempts++;
+    ensureCss();
     animInit();
     var wired = applyLinks();
     if (wired === 0 && attempts < 30) setTimeout(tryWire, 700);
   }
+  // Keep CSS present and overlay hidden during the page's boot phase.
+  var guard = setInterval(ensureCss, 400);
+  setTimeout(function () { clearInterval(guard); }, 25000);
   function start() {
+    ensureCss();
     fetch("/api/resources").then(function (r) { return r.json(); }).then(function (data) {
       resourceList = (data.resources || []).filter(function (r) { return r.link; });
       tryWire();
