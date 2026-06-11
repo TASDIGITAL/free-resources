@@ -1,0 +1,14 @@
+{
+  // Cloudflare Worker config for the free-resources site.
+  // index.html is served as a static asset; worker.js adds /api/resources.
+  "name": "free-resources",
+  "main": "worker.js",
+  "compatibility_date": "2026-06-11",
+  "assets": {
+    "directory": "./",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
