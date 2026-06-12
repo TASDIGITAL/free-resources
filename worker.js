@@ -24,6 +24,7 @@ const IMAGE_PROXY = {
 
 const INJECT_CSS = [
   "#__bundler_err{display:none !important}",
+  "#__bundler_thumbnail{display:none !important}",
   ".topbar__logo{height:36px !important}",
   ".foot__logo{height:30px !important}",
   "@media (prefers-reduced-motion: no-preference){",
