@@ -319,7 +319,9 @@ const WIRE_SCRIPT = `(function () {
           keepalive: true,
         }).catch(function () {});
       }
-      var validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(payload.email || "").trim());
+      var em = String(payload.email || "").trim();
+      var at = em.indexOf("@");
+      var validEmail = at > 0 && em.indexOf(" ") === -1 && em.indexOf(".", at + 2) > at + 1 && em.lastIndexOf(".") < em.length - 1;
       var validName = String(payload.full_name || "").trim().length >= 2;
       if (validEmail && validName) {
         setTimeout(function () { showWelcome(payload.full_name); }, 420);
