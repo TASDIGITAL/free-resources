@@ -25,6 +25,26 @@ const IMAGE_PROXY = {
 const INJECT_CSS = [
   "#__bundler_err{display:none !important}",
   "#__bundler_thumbnail{display:none !important}",
+  "#tas-welcome{position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;background:rgba(20,10,50,.45);backdrop-filter:blur(6px);transition:opacity .35s ease;padding:20px}",
+  "#tas-welcome.tas-welcome--out{opacity:0}",
+  ".tas-welcome__card{max-width:530px;width:100%;background:linear-gradient(135deg,#5b21b6,#7c3aed);color:#fff;border-radius:18px;padding:42px 40px;box-shadow:0 30px 80px rgba(20,10,50,.35)}",
+  ".tas-welcome__card h2{color:#fff;font-size:30px;line-height:1.2;margin:0 0 12px}",
+  ".tas-welcome__card p{color:rgba(255,255,255,.88);font-size:15px;line-height:1.55;margin:0 0 6px}",
+  ".tas-welcome__list{margin:18px 0 16px;padding:0;list-style:none}",
+  ".tas-welcome__list li{display:flex;gap:10px;align-items:center;color:#fff;font-size:15px;padding:7px 0}",
+  ".tas-welcome__list li span:first-child{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.18);font-size:12px}",
+  ".tas-welcome__btn{margin-top:16px;width:100%;background:#fff;color:#5b21b6;border:0;border-radius:10px;padding:14px 18px;font-size:15px;font-weight:600;cursor:pointer;transition:transform .15s ease}",
+  ".tas-welcome__btn:hover{transform:scale(1.03)}",
+  "@media (prefers-reduced-motion: no-preference){",
+  ".tas-welcome__card{animation:tasPop .5s cubic-bezier(.2,.9,.3,1.15)}",
+  "@keyframes tasPop{from{opacity:0;transform:translateY(26px) scale(.96)}to{opacity:1;transform:none}}",
+  ".tas-welcome__list li{opacity:0;animation:tasItem .45s ease forwards}",
+  ".tas-welcome__list li:nth-child(1){animation-delay:.3s}",
+  ".tas-welcome__list li:nth-child(2){animation-delay:.45s}",
+  ".tas-welcome__list li:nth-child(3){animation-delay:.6s}",
+  ".tas-welcome__list li:nth-child(4){animation-delay:.75s}",
+  "@keyframes tasItem{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}",
+  "}",
   ".topbar__logo{height:36px !important}",
   ".foot__logo{height:30px !important}",
   "@media (prefers-reduced-motion: no-preference){",
@@ -268,6 +288,34 @@ const WIRE_SCRIPT = `(function () {
       }
     }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "id"] });
   } catch (x) {}
+  // Animated welcome overlay shown right after a successful gate submit.
+  function showWelcome(fullName) {
+    if (document.getElementById("tas-welcome")) return;
+    var first = String(fullName || "").trim().split(/\s+/)[0] || "";
+    var safeFirst = first.replace(/[<>&"']/g, "");
+    var el = document.createElement("div");
+    el.id = "tas-welcome";
+    el.innerHTML =
+      '<div class="tas-welcome__card" role="dialog" aria-label="Welcome">' +
+      "<h2>You're in" + (safeFirst ? ", " + safeFirst : "") + "! \uD83C\uDF89</h2>" +
+      '<p>Thanks for submitting \u2014 the growth playbook is yours. Inside you\u2019ll find resources on:</p>' +
+      '<ul class="tas-welcome__list">' +
+      '<li><span>\u2713</span><span>Creative Strategy</span></li>' +
+      '<li><span>\u2713</span><span>Advertising</span></li>' +
+      '<li><span>\u2713</span><span>Email Marketing</span></li>' +
+      '<li><span>\u2713</span><span>CRO</span></li>' +
+      "</ul>" +
+      '<p>It\u2019s lifetime access \u2014 and guess what: we\u2019re always adding new resources to this playbook, so check back from time to time.</p>' +
+      '<button type="button" class="tas-welcome__btn">Explore the resources \u2192</button>' +
+      "</div>";
+    document.body.appendChild(el);
+    el.querySelector(".tas-welcome__btn").addEventListener("click", function () {
+      el.classList.add("tas-welcome--out");
+      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 380);
+      var target = document.getElementById("resources") || document.querySelector("article.card");
+      if (target) { try { target.scrollIntoView({ behavior: "smooth" }); } catch (x) {} }
+    });
+  }
   // Mirror gate submissions to /api/gate so GHL gets a contact upsert.
   document.addEventListener("submit", function (e) {
     var f = e.target;
@@ -283,6 +331,11 @@ const WIRE_SCRIPT = `(function () {
           body: JSON.stringify(payload),
           keepalive: true,
         }).catch(function () {});
+      }
+      var validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(payload.email || "").trim());
+      var validName = String(payload.full_name || "").trim().length >= 2;
+      if (validEmail && validName) {
+        setTimeout(function () { showWelcome(payload.full_name); }, 420);
       }
     } catch (x) {}
   }, true);
