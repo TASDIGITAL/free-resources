@@ -48,6 +48,14 @@ const INJECT_CSS = [
   ".card__open{transition:transform .15s ease}",
   ".card__open:hover{transform:scale(1.06)}",
   "}",
+  ".tas-dupe{display:none}",
+  "@media (prefers-reduced-motion: no-preference){",
+  ".quotes__viewport{position:relative;max-height:560px;overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 85%,transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 14%,#000 85%,transparent 100%)}",
+  ".quotes__grid.tas-vscroll{animation:tasVScroll 75s linear infinite}",
+  ".quotes__viewport:hover .quotes__grid.tas-vscroll{animation-play-state:paused}",
+  ".quotes__grid.tas-vscroll .tas-dupe{display:flex}",
+  "@keyframes tasVScroll{from{transform:translateY(0)}to{transform:translateY(-50%)}}",
+  "}",
 ].join("");
 
 export default {
