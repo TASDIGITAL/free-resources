@@ -124,7 +124,10 @@ export default {
 // so automations can target them (new contacts also fire GHL's
 // "contact created" trigger for lead-magnet follow-up).
 async function gate(request, env) {
-  if (!env.GHL_TOKEN) return json({ ok: false, error: "Gate not configured" }, 503);
+  // Forwards the gate submission to the n8n workflow "Lead Magnet -> GHL Contact",
+  // which creates/updates the GHL contact. The GHL token now lives only in n8n's
+  // credential, so it never needs to be a Worker secret again.
+  const N8N_GATE_WEBHOOK = "https://primary-production-1e83.up.railway.app/webhook/lead-magnet-gate";
   let body;
   try {
     body = await request.json();
@@ -136,28 +139,12 @@ async function gate(request, env) {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return json({ ok: false, error: "Invalid email" }, 400);
   }
-  const res = await fetch("https://services.leadconnectorhq.com/contacts/upsert", {
+  const res = await fetch(N8N_GATE_WEBHOOK, {
     method: "POST",
-    headers: {
-      Authorization: "Bearer " + env.GHL_TOKEN,
-      Version: "2021-07-28",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      locationId: GHL_LOCATION,
-      email: email,
-      name: name || undefined,
-      source: "D2C Resource Library",
-      tags: ["d2c-resource-library"],
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ full_name: name, email: email }),
   });
-  if (!res.ok) {
-    var dbg = "";
-    try { dbg = (await res.text()).slice(0, 400); } catch (e) {}
-    return json({ ok: false, upstreamStatus: res.status, upstreamBody: dbg }, 200);
-  }
-  const data = await res.json();
-  return json({ ok: true, existing: !(data && data.new) });
+  return json({ ok: res.ok });
 }
 
 async function proxyImage(pathname, request, ctx) {
