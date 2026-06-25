@@ -151,7 +151,11 @@ async function gate(request, env) {
       tags: ["d2c-resource-library"],
     }),
   });
-  if (!res.ok) throw new Error("GHL upsert responded " + res.status);
+  if (!res.ok) {
+    var dbg = "";
+    try { dbg = (await res.text()).slice(0, 400); } catch (e) {}
+    return json({ ok: false, upstreamStatus: res.status, upstreamBody: dbg }, 200);
+  }
   const data = await res.json();
   return json({ ok: true, existing: !(data && data.new) });
 }
