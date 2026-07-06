@@ -236,6 +236,21 @@ const WIRE_SCRIPT = `(function () {
   if (window.__resourceLinksWired) return;
   window.__resourceLinksWired = true;
   window.__errCapture = [];
+  // Meta (Facebook) Pixel — bootstrap here so it survives the page's DOM
+  // rebuild. fbq attaches to window and persists even after the boot wipe.
+  try {
+    if (!window.fbq) {
+      !function (f, b, e, v, n, t, s) {
+        if (f.fbq) return;
+        n = f.fbq = function () { n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments); };
+        if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = "2.0"; n.queue = [];
+        t = b.createElement(e); t.async = !0; t.src = v;
+        s = b.getElementsByTagName(e)[0]; s.parentNode.insertBefore(t, s);
+      }(window, document, "script", "https://connect.facebook.net/en_US/fbevents.js");
+      window.fbq("init", "709994526800096");
+      window.fbq("track", "PageView");
+    }
+  } catch (e) {}
   window.addEventListener("error", function (e) {
     try {
       var t = e.target || {};
@@ -323,6 +338,7 @@ const WIRE_SCRIPT = `(function () {
       var validEmail = at > 0 && em.indexOf(" ") === -1 && em.indexOf(".", at + 2) > at + 1 && em.lastIndexOf(".") < em.length - 1;
       var validName = String(payload.full_name || "").trim().length >= 2;
       if (validEmail && validName) {
+        try { if (window.fbq) window.fbq("track", "Lead"); } catch (fbErr) {}
         setTimeout(function () { showWelcome(payload.full_name); }, 420);
       }
     } catch (x) {}
