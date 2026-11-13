@@ -1,0 +1,16 @@
+name = "free-resources"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+
+# The free *.workers.dev address is one of the hostnames the Worker answers on
+# (SITES maps it to the client library), so it stays enabled.
+workers_dev = true
+
+# Custom domains. Workers Builds provisions these on deploy.
+routes = [
+  { pattern = "creative.tas-digital.ai", custom_domain = true },
+  { pattern = "resources.tas-digital.ai", custom_domain = true },
+]
+
+[observability]
+enabled = true
